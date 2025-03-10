@@ -1,0 +1,109 @@
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+# 5/31/2022 - BJM
+# 
+# this script was written to perform random site selection based on 1 mile 
+# sites. In previous discussions with partners, 1 mile sites were determined to
+# be appropriate for electrofishing because they give plenty of space for
+# completing an electrofishing transect without encroaching on an adjacent site
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+# First, input the max and min river miles available for sampling in a pool
+# the current numbers are an example
+#min <- 126.4
+#max <- 161.7
+
+# then create a vector of river miles to be sampled
+#rm.vec <- seq(min,max,0.5)
+
+# set the number of sites to sample
+# here, I specified a proportion of available sites but you could just use
+# an integer value
+#N <- floor(.5 * length(rm.vec) + .5)
+# adding 0.5 and using the floor() function ensures that numbers ending in 0.5 
+# are rounded up whereas if you use the round() function, these numbers would be 
+# rounded down
+
+# set the seed
+# this allows for the site selection to be replicated but needs to be changed
+# each time you need to select new sites. An easy way to do this is to use the
+# year (if your sampling is annual)
+#set.seed(2024)
+
+# draw a random sample
+#sites.prim <- sample(rm.vec, N, replace = F)
+#sites.back <- sample(rm.vec, N, replace = F)
+
+# randomly select the bank on which sampling occurs
+# here, I use N and S to indicate North or South
+#bank <- c('N', 'S')
+
+#set.seed(2024)
+#bank.prim <- sample(bank, N, replace = T)
+#bank.back <- sample(bank, N, replace = T)
+
+# combine into a single vector
+#sites.final.prim <- paste(sites.prim, bank.prim, sep = '')
+#sites.final.back <- paste(sites.back, bank.back, sep = '')
+
+# see which backup sites are in the list of primary sites
+#sites.final.back %in% sites.final.prim
+
+#WillowSites <- data.frame(sites.final.prim, sites.final.back)
+#WillowSites %>%
+  #rename(Primary_Sites = sites.final.prim, Backup_Sites = sites.final.back)
+
+#write_xlsx(WillowSites, "C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Site Selection/Willow Island Sites.xlsx")
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+# an alternative approach that is equally viable
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+# First, input the max and min river miles available for sampling in a pool
+# the current numbers are an example
+min <- 126.5
+max <- 161.5
+
+# then create a vector of river miles to be sampled
+rm.vec <- rep(seq(min,max,0.5), 2)
+
+# create a vector of banks such that each river mile can be aligned with both a 
+# N and S bank
+bank <- c(rep('N', 0.5 * length(rm.vec)), rep('S', 0.5 * length(rm.vec)))
+
+# combine the vectors so that you have N and S river miles on each bank
+sites <- paste(rm.vec, bank, sep = '')
+
+# set the number of sites to sample
+# here, I specified a proportion of available sites (half of what was used above
+# to result in the same number of sites selected) but you could just use
+# an integer value
+N <- floor(0.5 * length(rm.vec) + 0.5)
+# adding 0.5 and using the floor() function ensures that numbers ending in 0.5 
+# are rounded up whereas if you use the round() function, these numbers would be 
+# rounded down
+
+# set the seed
+set.seed(2024)
+
+# select you
+sites.final.prim <- sample(sites, N, replace = F)
+sites.final.back <- sample(sites, N, replace = F)
+
+# see which backup sites are in the list of primary sites
+sites.final.back %in% sites.final.prim
+
+WillowIslandSites <- data.frame(sites.final.prim, sites.final.back)
+WillowIslandSites %>%
+  rename(Primary_Sites = sites.final.prim, Backup_Sites = sites.final.back)
+
+write_xlsx(WillowIslandSites, "C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Site Selection/Willow Island Sites.xlsx")
+
+
+# The downside to the second  method is that you can end up selecting both 
+# banks in the same river mile, which may not be ideal. For the hydroacoustics 
+# site selection, we use the first method
+
+# regardless of the method used, I would run the selection twice so that you 
+# generate 2 sets of sites. This gives you a set of primary sites and a backup
+# set so that if a site is selected for which deploying a gear (e.g., gill nets)
+# is not possible/unsafe, you can refer to your secondary list for a replacement
