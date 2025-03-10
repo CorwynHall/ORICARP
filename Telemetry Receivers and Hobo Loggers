@@ -1,0 +1,101 @@
+#LoadPackages-----Installs and loads necessary r extensions---------------------------------------------------------------
+install.packages("plyr","tidyverse")
+library(plyr)
+library(tidyverse)
+
+#Set Target Folder--IMPORTANT-Change Working Directory Here---------------------------------
+tgt <- "January 2024"  #Change this to desired month.  Ensure all folder names match
+
+mainDir <- "P:/LGLFWCO Ohio River Substation/Telemetry Receivers and HOBO loggers/R/Receivers/Outputs"
+subDir <- tgt
+dir.create(file.path(mainDir, subDir), showWarnings = FALSE)
+cdby <- as.Date(paste('01',tgt),format='%d %b %Y')
+#PrepCutList-----Creates a dataframe of receiver IDs-------------------------------------------------------------------------
+TagIDs <- read.csv("P:\\LGLFWCO Ohio River Substation\\Telemetry Receivers and HOBO loggers\\R\\Receivers\\Transmitter_IDs\\Receiver_IDs.csv",header=TRUE,sep=",") #Change Path to list of receiver IDs
+CutTags <- c('Receiver.Serial')
+TagIDs = subset(TagIDs, select = !(names(TagIDs)%in% CutTags))
+TagIDs <- unlist(TagIDs$Receiver.Tag.ID)
+
+#Base----Outputs all detections within 3 months before current system time------------------------------------------------
+ab <- paste("P:/LGLFWCO Ohio River Substation/Telemetry Receivers and HOBO loggers/R/Receivers/Inputs/",tgt,sep="")
+setwd(ab)
+ac <- list.files(path = ab)
+df = do.call(rbind, lapply(ac, function(x) read.csv(x, stringsAsFactors = FALSE)))
+cut <- c('Transmitter.Name','Transmitter.Serial','Sensor.Value','Sensor.Unit','Station.Name','Latitude','Longitude','Transmitter.Type','Sensor.Precision')
+df = subset(df, select = !(names(df) %in% cut))
+df <- df[!grepl(paste(TagIDs, collapse='|'), df$Transmitter),]
+df <- df %>%
+  filter(Date.and.Time..UTC. >= format(cdby-2*30, "%Y-%m"))
+
+#Tags----Generates list of possible transmitters with shortened IDs------------------------------------------------------
+tag <- read.csv("P:\\LGLFWCO Ohio River Substation\\Telemetry Receivers and HOBO loggers\\R\\Receivers\\Transmitter_IDs\\FishTagsList.csv",header=TRUE,sep=",")  #Change to Location of Master Tags List
+ct <- c('x','x.1','x.2','x.3','x.4','x.5','x.6','x.7','x.8','x.9','x.10','x.11','x.12','x.13')
+tag = subset(tag, select = !(names(tag) %in% ct))
+tag$Transmitter.ID<- str_sub(tag$Transmitter.ID,-5,-1)
+check <- as.data.frame(table(tag$ShortID))
+check <- check %>%
+  filter(Freq > 1)
+tag$Transmitter.ID <- gsub(" ", "", tag$Transmitter.ID)
+write.csv(check,'P:\\LGLFWCO Ohio River Substation\\Telemetry Receivers and HOBO loggers\\R\\Receivers\\Discrepancies\\DuplicateTagIDs.csv') #Change to desired location of duplicate tags check
+
+#Species Specific----Associates detections with species and prints separate csv's-accordingly---------------------------
+sp <- df
+sp <- separate(sp,"Transmitter", c("A","B","Transmitter.ID"), sep="-")
+cts <- c('A','B')
+sp = subset(sp, select = !(names(sp) %in% cts))
+sp <- apply(sp,2,str_remove_all," ")
+
+offload <- sp
+reference <- tag
+
+recinf <- read.csv("P:\\LGLFWCO Ohio River Substation\\Telemetry Receivers and HOBO loggers\\R\\Receivers\\Transmitter_IDs\\ReceiverInfo.csv",header=TRUE,sep=",")
+offload <- merge(offload,recinf,by="Receiver")
+
+offload <- merge(offload,reference,by="Transmitter.ID")
+
+path_out <- 'P:\\LGLFWCO Ohio River Substation\\Telemetry Receivers and HOBO loggers\\R\\Receivers\\Outputs\\' #Change Path for Different Save Location
+path_out <- paste(path_out,tgt,"\\",sep="")
+
+#Paddlefish Save
+pdf <- filter(offload, Species == "Paddlefish")
+pdffilename <- paste(path_out,paste0('Paddlefish Detections ',tgt,'.csv'),sep = '')
+write.csv(pdf,pdffilename)
+
+#Catfish Save
+bcat <- filter(offload, Species == "Flathead_Catfish")
+fcat <- filter(offload, Species == "Blue_Catfish")
+cats <- rbind(bcat,fcat)
+catsfilename <- paste(path_out,paste0('Catfish Detections ',tgt,'.csv'),sep = '')
+write.csv(cats,catsfilename)
+
+#Carp Save
+bhc <- filter(offload, Species == "Bighead_Carp")
+slc <- filter(offload, Species == "Silver_Carp")
+hyp <- filter(offload, Species == "Hypophthalmicthys")
+carp <- rbind(bhc,slc,hyp)
+carpfilename <- paste(path_out,paste0('Carp Detections ',tgt,'.csv'),sep = '')
+write.csv(carp,carpfilename)
+
+#Master Save
+mstr <- rbind(pdf,cats,carp)
+mstrfilename <- paste(path_out,paste0('All Detections ',tgt,'.csv'),sep = '')
+write.csv(mstr,mstrfilename)
+
+#Movement-----------------------------------
+mstr$tagloc <- paste(mstr$Transmitter.ID,mstr$Receiver,sep='~')
+minster <- as.data.frame (mstr %>%
+                            group_by(tagloc) %>%
+                            filter(Date.and.Time..UTC. == min(Date.and.Time..UTC.)))
+maxster <- as.data.frame (mstr %>%
+                            group_by(tagloc) %>%
+                            filter(Date.and.Time..UTC. == max(Date.and.Time..UTC.)))
+minmax <- data.frame(maxster$tagloc,maxster$Date.and.Time..UTC.,minster$Date.and.Time..UTC.)
+minmax$tagloc <- minmax$maxster.tagloc
+mstr <- merge(mstr,minmax,by="tagloc")
+cuts <- c('Date.and.Time..UTC.','maxster.tagloc','tagloc','maxster.Transmitter.ID.x','maxster.Transmitter.ID.y','maxster.Date.and.Time..UTC..y','minster.Date.and.Time..UTC..y','maxster.Transmitter.ID','maxster.Date.and.Time..UTC..x.1','minster.Date.and.Time..UTC..x.1','minster.Date.and.Time..UTC..','maxster.Date.and.Time..UTC..x')
+mstr = subset(mstr, select = !(names(mstr) %in% cuts))
+mstr <- mstr[!duplicated(mstr),]
+colnames(mstr) <- c("Transmitter ID","Receiver","Location","Latitude","Longitude","Recapture Action","Species","Sex","Last Detection","First Detection")
+mvmt <- mstr
+mvmtfilename <- paste(path_out,paste0('All Movements ',tgt,'.csv'),sep = '')
+write.csv(mvmt,mvmtfilename)
