@@ -1,0 +1,159 @@
+#-----Packages-----
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("openxlsx")
+install.packages("lubridate")
+library(readxl)
+library(dplyr)
+library(openxlsx)
+library(tools)
+library(lubridate)
+
+#-----Convert XLSX to CSV-----
+flowin <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Ohio River Conditions Dataset/Average Daily Flow"
+flowout <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R/Average Daily Flow"
+xlsx_files <- list.files(path = flowin, pattern = "\\.xlsx$", full.names = TRUE)
+for (file in xlsx_files) {
+  data <- read.xlsx(file, sheet = 1, startRow = 7, cols = c(2,3), detectDates = TRUE)
+  data[] <- lapply(data, as.character)
+  colnames(data) <- c("Date","Flow")
+  file_name <- tools::file_path_sans_ext(basename(file))
+  output_file <- file.path(flowout, paste0(file_name, ".csv"))
+  write.csv(data, output_file, row.names = FALSE)
+}
+stagein <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Ohio River Conditions Dataset/Average Daily Stage Height"
+stageout <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R/Average Daily Stage Height"
+xlsx_files <- list.files(path = stagein, pattern = "\\.xlsx$", full.names = TRUE)
+for (file in xlsx_files) {
+  data <- read.xlsx(file, sheet = 1,startRow = 7, cols = c(2,3), detectDates = TRUE)
+  data[] <- lapply(data, as.character)
+  colnames(data) <- c("Date","Stage Height")
+  file_name <- tools::file_path_sans_ext(basename(file))
+  output_file <- file.path(stageout, paste0(file_name, ".csv"))
+  write.csv(data, output_file, row.names = FALSE)
+}
+
+tempin <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Ohio River Conditions Dataset/Temperature"
+tempout <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R/Temperature"
+xlsx_files <- list.files(path = tempin, pattern = "\\.xlsx$", full.names = TRUE)
+for (file in xlsx_files) {
+  data <- read.xlsx(file, sheet = 1, startRow = 10, detectDates = TRUE)
+  data$X1 <- convertToDate(data$X1)
+  data$X3 <- convertToDate(data$X3)
+  data$X5 <- convertToDate(data$X5)
+  data$X7 <- convertToDate(data$X7)
+  data$X9 <- convertToDate(data$X9)
+  data$X11 <- convertToDate(data$X11)
+  data$X13 <- convertToDate(data$X13)
+  file_name <- tools::file_path_sans_ext(basename(file))
+  output_file <- file.path(tempout, paste0(file_name, ".csv"))
+  colnames(data) <- c("WinfDate","WinfTemp","WillDate","WillTemp","BellDate","BellTemp","RacDate","RacTemp","RCDate","RCTemp","GreenDate","GreenTemp","MeldDate","MeldTemp")
+  
+  Winf <- data[, grep("Winf", colnames(data))]
+  colnames(Winf) <- c("Date","Temp")
+  output_file <- file.path(tempout, "Winfield.csv")
+  write.csv(Winf, output_file, row.names = FALSE)
+  Will <- data[, grep("Will", colnames(data))]
+  colnames(Will) <- c("Date","Temp")
+  output_file <- file.path(tempout, "Willow Island.csv")
+  write.csv(Will, output_file, row.names = FALSE)
+  Bell <- data[, grep("Bell", colnames(data))]
+  colnames(Bell) <- c("Date","Temp")
+  output_file <- file.path(tempout, "Belleville.csv")
+  write.csv(Bell, output_file, row.names = FALSE)
+  Rac <- data[, grep("Rac", colnames(data))]
+  colnames(Rac) <- c("Date","Temp")
+  output_file <- file.path(tempout, "Racine.csv")
+  write.csv(Rac, output_file, row.names = FALSE)
+  RC <- data[, grep("RC", colnames(data))]
+  colnames(RC) <- c("Date","Temp")
+  output_file <- file.path(tempout, "RC Byrd.csv")
+  write.csv(RC, output_file, row.names = FALSE)
+  Green <- data[, grep("Green", colnames(data))]
+  colnames(Green) <- c("Date","Temp")
+  output_file <- file.path(tempout, "Greenup.csv")
+  write.csv(Green, output_file, row.names = FALSE)
+}
+#-----Combine-----
+Belleville <- list.files(path = "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R", pattern = "Belleville.*\\.csv", recursive = TRUE, full.names = TRUE)
+df_list <- lapply(Belleville, function(file) read.csv(file))
+combined_df <- df_list[[1]]
+for (i in 2:length(df_list)) {
+  combined_df <- merge(combined_df, df_list[[i]], by = "Date", all = TRUE)
+}
+output_file <- file.path()
+write.csv(combined_df, "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Combined/Belleville.csv", row.names = FALSE)
+
+Greenup <- list.files(path = "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R", pattern = "Greenup.*\\.csv", recursive = TRUE, full.names = TRUE)
+df_list <- lapply(Greenup, function(file) read.csv(file))
+combined_df <- df_list[[1]]
+for (i in 2:length(df_list)) {
+  combined_df <- merge(combined_df, df_list[[i]], by = "Date", all = TRUE)
+}
+output_file <- file.path()
+write.csv(combined_df, "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Combined/Greenup.csv", row.names = FALSE)
+
+Racine <- list.files(path = "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R", pattern = "Racine.*\\.csv", recursive = TRUE, full.names = TRUE)
+df_list <- lapply(Racine, function(file) read.csv(file))
+combined_df <- df_list[[1]]
+for (i in 2:length(df_list)) {
+  combined_df <- merge(combined_df, df_list[[i]], by = "Date", all = TRUE)
+}
+output_file <- file.path()
+write.csv(combined_df, "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Combined/Racine.csv", row.names = FALSE)
+
+RCByrd <- list.files(path = "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R", pattern = "RC Byrd.*\\.csv", recursive = TRUE, full.names = TRUE)
+df_list <- lapply(RCByrd, function(file) read.csv(file))
+combined_df <- df_list[[1]]
+for (i in 2:length(df_list)) {
+  combined_df <- merge(combined_df, df_list[[i]], by = "Date", all = TRUE)
+}
+output_file <- file.path()
+write.csv(combined_df, "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Combined/RC Byrd.csv", row.names = FALSE)
+
+WillowIsland <- list.files(path = "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R", pattern = "Willow Island.*\\.csv", recursive = TRUE, full.names = TRUE)
+df_list <- lapply(WillowIsland, function(file) read.csv(file))
+combined_df <- df_list[[1]]
+for (i in 2:length(df_list)) {
+  combined_df <- merge(combined_df, df_list[[i]], by = "Date", all = TRUE)
+}
+output_file <- file.path()
+write.csv(combined_df, "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Combined/Willow Island.csv", row.names = FALSE)
+
+Winfield <- list.files(path = "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R", pattern = "Winfield.*\\.csv", recursive = TRUE, full.names = TRUE)
+df_list <- lapply(Winfield, function(file) read.csv(file))
+combined_df <- df_list[[1]]
+for (i in 2:length(df_list)) {
+  combined_df <- merge(combined_df, df_list[[i]], by = "Date", all = TRUE)
+}
+output_file <- file.path()
+write.csv(combined_df, "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Combined/Winfield.csv", row.names = FALSE)
+
+#-----Pull and Clean Tags-----
+tagsin <- read.csv("P:/LGLFWCO Ohio River Substation/OR Tagging Study/IC tag detections/Fish Detections 1.csv")
+tagsin$Ping.Date.and.Time <- parse_date_time(tagsin$Ping.Date.and.Time,
+                                             orders=c("ymd HMS", "dmy HMS", "mdy Ip", "mdy HM"), 
+                                             locale = "en")
+tagsin$Date <- as.character(as.Date(format(tagsin$Ping.Date.and.Time, "%Y-%m-%d")))
+tagsin$Pool <- tagsin$River.Pool
+tagsin$River.Pool <- NULL
+tagsin$X <- NULL
+#-----Combine-----
+csv_files <- list.files(path = "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Combined", pattern = "\\.csv$", full.names = TRUE)
+df_list <- list()
+for (file in csv_files) {
+  df <- read.csv(file)
+  df$file_name <- file
+  df_list[[file]] <- df
+}
+Parameters <- bind_rows(df_list)
+Parameters$Pool <- substr(Parameters$file_name, 60, nchar(Parameters$file_name) -4)
+Parameters$file_name <- NULL
+Parameters$Pool <- gsub("\\.","",Parameters$Pool)
+tagsin$Pool <- gsub("\\.","",tagsin$Pool)
+Final <- tagsin %>%
+  left_join(Parameters, by = c("Date", "Pool")) %>%
+  select(Date, Pool, everything(), Temp, Stage.Height, Flow)
+Final
+tagsin
+parameters
