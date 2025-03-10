@@ -1,0 +1,50 @@
+#-----Packages-----
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("openxlsx")
+library(readxl)
+library(dplyr)
+library(openxlsx)
+library(tools)
+
+#-----Convert XLSX to CSV-----
+flowin <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Ohio River Conditions Dataset/Average Daily Flow"
+flowout <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R/Average Daily Flow"
+xlsx_files <- list.files(path = flowin, pattern = "\\.xlsx$", full.names = TRUE)
+for (file in xlsx_files) {
+  data <- read.xlsx(file, sheet = 1, detectDates = TRUE)
+  data[] <- lapply(data, as.character)
+  file_name <- tools::file_path_sans_ext(basename(file))
+  output_file <- file.path(flowout, paste0(file_name, ".csv"))
+  write.csv(data, output_file, row.names = FALSE)
+}
+stagein <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Ohio River Conditions Dataset/Average Daily Stage Height"
+stageout <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R/Average Daily Stage Height"
+xlsx_files <- list.files(path = stagein, pattern = "\\.xlsx$", full.names = TRUE)
+for (file in xlsx_files) {
+  data <- read.xlsx(file, sheet = 1, detectDates = TRUE)
+  data[] <- lapply(data, as.character)
+  file_name <- tools::file_path_sans_ext(basename(file))
+  output_file <- file.path(stageout, paste0(file_name, ".csv"))
+  write.csv(data, output_file, row.names = FALSE)
+}
+tempin <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/Ohio River Conditions Dataset/Temperature"
+tempout <- "P:/LGLFWCO Ohio River Substation/OR Tagging Study/R/Temperature"
+xlsx_files <- list.files(path = tempin, pattern = "\\.xlsx$", full.names = TRUE)
+for (file in xlsx_files) {
+  data <- read.xlsx(file, sheet = 1,detectDates = FALSE)
+  for (col in names(data)) {
+    if(is.character(data[[col]])) {
+      potential_date <- as.POSIXct(data[[col]], format = "%m/%d/%Y %I:%M %p", tz = "UTC")
+      if (!any(is.na(potential_date))) {
+        data[[col]] <- format(potential_date, "%Y-%m-%d %H:%M:%S")
+      }
+    }
+  }
+  data[] <- lapply(data, as.character)
+  file_name <- tools::file_path_sans_ext(basename(file))
+  output_file <- file.path(tempout, paste0(file_name, ".csv"))
+  write.csv(data, output_file, row.names = FALSE)
+}
+#-----Next-----
+data
