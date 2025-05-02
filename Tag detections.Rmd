@@ -1,0 +1,161 @@
+---
+title: "Telemetry detections"
+author: "Andrew Peters"
+date: "2024-12-23"
+output: html_document
+---
+```{r Packages, include=FALSE}
+#LoadPackages-----Installs and loads necessary r extensions---------------------------------------------------------------
+library(dplyr)
+library(tidyverse)
+```
+
+```{r Fathom Data sheet play, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide'}
+# Step 2: Specify the folder where your CSV files are located
+folder_path <- "C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/Fathom Data"
+
+# Step 3: List all CSV files in the folder
+csv_files <- list.files(path = folder_path, pattern = "*.csv", full.names = TRUE)
+
+# Step 4: Read each CSV file into a list of dataframes
+data_list <- lapply(csv_files, read.csv, header = FALSE)
+
+# Step 4.1: Read FishTags from its CSV or dataframe
+# Assuming FishTags is a dataframe with a column 'TagID' that contains the 223 tag values
+FishTags <- read.csv("C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/FishTags.csv")  # Replace with your actual file path
+FishTags <- FishTags$Fish.Tag  # Assuming 'TagID' column contains the 223 tag values
+
+# Step 5: Define a function to remove rows based on condition (matching values in FishTags)
+remove_rows_based_on_condition <- function(df, FishTags) {
+  # Ensure V10 column exists and filter based on FishTags
+  if ("V10" %in% colnames(df)) {
+    # Filter the rows where V10 matches any value in FishTags
+    df <- df %>% filter(V10 %in% FishTags)
+  } else {
+    warning("Column 'V10' not found in dataframe.")
+  }
+  return(df)
+}
+
+# Step 6: Apply the function to each dataframe in the list
+cleaned_data_list <- lapply(data_list, remove_rows_based_on_condition, FishTags = FishTags)
+
+# Step 7: (Optional) Combine all cleaned dataframes into one dataframe
+final_data <- do.call(rbind, cleaned_data_list)
+
+# Step 8: View the final cleaned data (optional)
+head(final_data)
+
+ReceiverIDs <- read.csv("C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/Receiver_IDs.csv",header=TRUE,sep=",")
+
+FishTagIDs <- read.csv("C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/FishTags.csv")
+
+ReceiverIDs$Receiver.Serial <- as.character(ReceiverIDs$Receiver.Serial)
+
+final_data <- final_data %>%
+  mutate(Receiver.Name = ifelse(V7 %in% ReceiverIDs$Receiver.Serial, 
+                                ReceiverIDs$Receiver.Name[match(V7, ReceiverIDs$Receiver.Serial)], 
+                                "Unknown")) %>%
+  mutate(Fish.Species = ifelse(V10 %in% FishTagIDs$Fish.Tags, 
+                                FishTagIDs$Species[match(V10, FishTagIDs$Fish.Tags)], 
+                                "Unknown")) %>%
+  mutate(River.Pool = ifelse(Receiver.Name %in% ReceiverIDs$Receiver.Name, 
+                                ReceiverIDs$Pool[match(Receiver.Name, ReceiverIDs$Receiver.Name)], 
+                                "Unknown"))
+
+Fish_Detects <- final_data [ c(2,7,10,27,28,29)]
+Fish_Detects$V2 <- as.POSIXct(Fish_Detects$V2, format = "%Y-%m-%d %H:%M:%S")
+Fish_Detects$V2 <- as.character(Fish_Detects$V2)
+colnames(Fish_Detects) <- c("Ping Date and Time", "Receiver ID", "Fish Tag", "Receiver Name", "Fish Species", "River Pool")
+```
+
+```{r OHDNR Data, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide'}
+OHDNRData <- read.csv("C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Tagging Study/OHDNR Data/2024 ODOW Detections.csv", header = TRUE, sep=",")
+
+OHDNRData$Receiver.Serial <- as.character(OHDNRData$Receiver.Serial)
+
+OHDNRData_filtered <- OHDNRData %>%
+  filter(Transmitter %in% FishTagIDs$Fish.Tags) %>%
+   mutate(Fish.Species = ifelse(Transmitter %in% FishTagIDs$Fish.Tags, 
+                                FishTagIDs$Species[match(Transmitter, FishTagIDs$Fish.Tags)], 
+                                "Unknown"))
+OHDNRShrink <- OHDNRData_filtered [ c(1,2,3,7,8,13)]
+OHDNRShrink <- OHDNRShrink %>%
+  rename("Ping Date and Time" = Date.and.Time..UTC.) %>%
+  rename("Receiver ID" = "Receiver.Serial") %>%
+  rename("Fish Tag" = "Transmitter") %>%
+  rename("Receiver Name" = "SiteName") %>%
+  rename("River Pool" = "Pool") %>%
+  rename("Fish Species" = "Fish.Species")
+OHDNRShrink[,c(1,2,3,4,6,5)]
+```
+```{r VUE Data Play, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide'}
+# Step 2: Specify the folder where your CSV files are located
+VUEfolder_path <- "C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/VUE Data"
+
+# Step 3: List all CSV files in the folder
+csv_filesVUE <- list.files(path = VUEfolder_path, pattern = "*.csv", full.names = TRUE)
+
+# Step 4: Read each CSV file into a list of dataframes
+data_list_2 <- lapply(csv_filesVUE, read.csv, header = FALSE)
+
+# Step 4.1: Read FishTags from its CSV or dataframe
+# Assuming FishTags is a dataframe with a column 'TagID' that contains the 223 tag values
+FishTags <- read.csv("C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/FishTags.csv")  # Replace with your actual file path
+FishTags <- as.character(FishTags$Fish.Tag)  # Ensure FishTags is a character vector
+
+# Step 5: Define a function to remove rows based on condition (matching values in FishTags)
+remove_rows_based_on_condition_2 <- function(df, FishTags) {
+  # Ensure Transmitter column exists and filter based on FishTags
+  if ("V3" %in% colnames(df)) {
+    # Ensure the Transmitter column is also a character vector
+    df$V3 <- as.character(df$V3)
+    
+    # Filter the rows where Transmitter matches any value in FishTags
+    df <- df %>% filter(V3 %in% FishTags)
+  } else {
+    warning("Column 'Transmitter' not found in dataframe.")
+  }
+  return(df)
+}
+
+# Step 6: Apply the function to each dataframe in the list
+cleaned_data_list_2 <- lapply(data_list_2, remove_rows_based_on_condition_2, FishTags = FishTags)
+
+# Step 7: (Optional) Combine all cleaned dataframes into one dataframe
+final_VUEdata <- do.call(rbind, cleaned_data_list_2)
+
+# Step 8: View the final cleaned data (optional)
+head(final_VUEdata)
+
+ReceiverIDs <- read.csv("C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/Receiver_IDs.csv",header=TRUE,sep=",")
+
+FishTagIDs <- read.csv("C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/FishTags.csv")
+
+ReceiverIDs$Receiver.Serial <- as.character(ReceiverIDs$Receiver.Serial)
+
+final_VUEdata <- final_VUEdata %>%
+  mutate(Receiver = as.character(V2)) %>%
+  mutate(Receiver.ID = sub("VR2Tx-", "", V2)) %>%
+  mutate(Receiver.Name = ifelse(Receiver.ID %in% ReceiverIDs$Receiver.Serial, 
+                                ReceiverIDs$Receiver.Name[match(Receiver.ID, ReceiverIDs$Receiver.Serial)], 
+                                "Unknown")) %>%
+  mutate(Fish.Species = ifelse(V3 %in% FishTagIDs$Fish.Tags, 
+                                FishTagIDs$Species[match(V3, FishTagIDs$Fish.Tags)], 
+                                "Unknown")) %>%
+  mutate(River.Pool = ifelse(Receiver.Name %in% ReceiverIDs$Receiver.Name, 
+                                ReceiverIDs$Pool[match(Receiver.Name, ReceiverIDs$Receiver.Name)], 
+                                "Unknown"))
+
+Fish_DetectsVUE <- final_VUEdata [ c(1,3,14,15,16,17)]
+Fish_DetectsVUE$V1 <- as.POSIXct(Fish_DetectsVUE$V1, format = "%Y-%m-%d %H:%M:%S")
+Fish_DetectsVUE$V1 <- as.character(Fish_DetectsVUE$V1)
+colnames(Fish_DetectsVUE) <- c("Ping Date and Time", "Fish Tag", "Receiver ID", "Receiver Name", "Fish Species", "River Pool")
+```
+
+
+
+```{r Final Data, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide'}
+FishDetMaster <- rbind(Fish_Detects, OHDNRShrink, Fish_DetectsVUE)
+write.csv(FishDetMaster, "C:/Users/apeters/OneDrive - DOI/Projects/ORI FWCO/Telemetry/Tag Detections/Fish Detections.csv")
+```

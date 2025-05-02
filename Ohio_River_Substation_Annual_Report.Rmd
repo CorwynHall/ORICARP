@@ -1,0 +1,1043 @@
+---
+fontsize: 11pt
+header-includes:
+- \usepackage{fancyhdr}
+- \setlength{\headheight}{13.59999pt}
+- \pagenumbering{gobble}
+- \usepackage{helvet}
+- \usepackage{tcolorbox}
+- \usepackage{pdflscape}
+- \usepackage[paper=a4, DIV=17]{typearea}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+- \usepackage{hyperref}
+geometry: margin=0.75in
+output:
+  pdf_document:
+        df_print: paged
+urlcolor: blue
+params:
+  YEAR: 2024
+---
+
+```{r Packages, include=FALSE}
+library(sf)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(arcgisbinding)
+library(writexl)
+library(readr)
+library(readxl)
+library(janitor)
+library(ggspatial)
+library(ggrepel)
+library(english)
+library(kableExtra)
+library(ggforce)
+library(lwgeom)
+library(scales)
+library(magrittr)
+library(purrr)
+library(english)
+library(knitr)
+library(data.table)
+```
+
+```{r Data Fetch, echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, cache=FALSE, results='hide'}
+
+##### Prefer Method:  Read Hosted Feature Layer
+
+arc.check_product() ### Checks arcGIS licensing ---> Must have a offline version of this license
+
+#### Early Detection Monitoring
+
+## EDM: Juvenile/Adult Fish
+# Site Data
+ORIC_Site_FL <- arc.select(arc.open(("https://services.arcgis.com/QVENGdaPbd4LUkLV/arcgis/rest/services/service_c8f005df2d814ee9a6a24999cbbb4f04/FeatureServer/0"))) %>%
+  filter(str_detect(Site_ID, as.character(params$YEAR)))
+
+# Fish Count Data
+ORIC_Count_FL <- arc.select(arc.open(("https://services.arcgis.com/QVENGdaPbd4LUkLV/arcgis/rest/services/service_c8f005df2d814ee9a6a24999cbbb4f04/FeatureServer/1"))) %>%
+  filter(str_detect(Count_ID, as.character(params$YEAR)))
+
+# Fish Individual Data
+ORIC_Individual_FL <- arc.select(arc.open(("https://services.arcgis.com/QVENGdaPbd4LUkLV/arcgis/rest/services/service_c8f005df2d814ee9a6a24999cbbb4f04/FeatureServer/2"))) %>%
+  filter(str_detect(Individual_ID, as.character(params$YEAR)))
+```
+
+```{r Data Shrink, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE, results = 'hide'}
+Site_Data <- ORIC_Site_FL
+ORIC_Site_FL$EF_ShockTime_seconds <- as.numeric(ORIC_Site_FL$EF_ShockTime_seconds)
+Count_Data <- ORIC_Count_FL %>% 
+  select(objectid, Count_ID, Count_Common_Name, Number)
+Joint_Data <- Site_Data %>% # Calling Site table data
+  select(Site_ID, Project, River_Basin, River_Pool,Tributary, Tributary_Pool, Tributary_Pool_Tributary, Gear) %>% # Selected required columns from Site table
+  left_join(., ORIC_Count_FL, by = c("Site_ID" = "Count_ID")) %>% # Joining Site table columns and Count table
+  select(Project, River_Basin, River_Pool, Tributary, Tributary_Pool, Tributary_Pool_Tributary, Gear, Count_Common_Name, Number) %>%  # Selecting required fields
+  mutate(Stream_Name = coalesce(Tributary_Pool_Tributary, Tributary, River_Basin)) %>% # Added new column name and ran ifelse to pull out tributary, main river, tributary of a tributary. is.na to filter any name with na to return Ohio River or Kanawha. !is.na to filter any name that isn't na.
+  mutate(Site_Name = coalesce(Tributary_Pool, River_Pool))
+
+Site_Info <- Site_Data %>%
+  select(Site_ID, River_Basin, River_Pool,Tributary, Tributary_Pool, Tributary_Pool_Tributary, Gear, Strata) %>%
+  mutate(Stream_Name = coalesce(Tributary_Pool_Tributary, Tributary, River_Basin)) %>% # Added new column name and ran ifelse to pull out tributary, main river, tributary of a tributary. is.na to filter any name with na to return Ohio River or Kanawha. !is.na to filter any name that isn't na.
+  mutate(Site_Name = coalesce(Tributary_Pool, River_Pool))
+
+EFData <- ORIC_Site_FL %>%
+  select(Gear, EF_ShockTime_seconds) %>%
+  filter(Gear %in% "Electrofishing") #filtering just efishing gear and shocktime
+
+GearData <- Site_Data %>%
+  select(River_Basin, River_Pool,Tributary, Tributary_Pool, Tributary_Pool_Tributary, Gear, Gear_Specific) %>%
+  mutate(Gear_Type = if_else(Gear == "Trawl", Gear_Specific, Gear)) %>%
+  mutate(Stream_Name = coalesce(Tributary_Pool_Tributary, Tributary, River_Basin)) %>% # Added new column name and ran ifelse to pull out tributary, main river, tributary of a tributary. is.na to filter any name with na to return Ohio River or Kanawha. !is.na to filter any name that isn't na.
+  mutate(Site_Name = coalesce(Tributary_Pool, River_Pool)) #gear data with pool sampled
+
+```
+
+\newcommand{\fon}[1]{\fontfamily{#1}\selectfont}
+
+```{=tex}
+\begin{tcolorbox}[colback=black,colframe=black,coltext=white,left*=2mm,height=11mm, sharp corners,fontupper=\LARGE\fontfamily{phv}\selectfont\bfseries]
+U.S. Fish \& Wildlife Service
+\end{tcolorbox}\vspace{-.1cm}
+```
+\Large\textbf{\fontfamily{phv}\selectfont Aquatic Invasive Species
+Annual Report: `r params$YEAR`}\vspace{-.1cm}
+
+\Large\textmd{\textit{Lower Great Lakes FWCO - Ohio River Substation: Williamstown, WV}}\vspace{-.1cm}
+
+\selectfont\large\textbf{Report Creation Date:} `r today()`
+
+\selectfont\large\textbf{Report Data Date Range:}
+`r as_date(min(ORIC_Site_FL$Start_DateTime))` to
+`r as_date(max(ORIC_Site_FL$Start_DateTime))` \vspace{.5cm}
+
+\selectfont\large\textbf{Introduction}
+
+\selectfont\large This report summarizes data from the second year of an
+early detection and monitoring program for invasive carp in the Ohio
+River by the LGLFWCO Ohio River Substation based in Williamstown, WV.
+This office was created to further the USFWS responsibility of managing
+aquatic invasive species. The sampling conducted at this office supports
+goal 3 of the USFWS Fisheries and Aquatic Conservation (FAC) Strategic
+Plan. This goal has four objectives: Prevent introduction of invasive
+species, work with partner agencies to implement an early detection and
+rapid response framework, work with partners to prevent the spread of
+invasive species, and manage established populations of invasive
+species. As invasive carp are a major problem throughout the Mississippi 
+River drainage, multiple partnerships have been established to conduct work 
+to monitor, remove, and control these established populations across 
+different river basins. The Ohio River Invasive Carp Partnership consists 
+of state, and federal agencies, as well as Universities that work together 
+to tackle goals and objectives derived to monitor, remove, and control invasive
+carp. The work this office conducts not only supports the FAC strategic
+plan for USFWS, but also supports the goals and objectives of the Ohio
+River Basin Invasive Carp Partnership. The focus of this office is early
+detection and monitoring of populations in and above the invasion front,
+**R.C. Byrd Pool** (RM 279.2), of the Ohio River.
+
+The Ohio River Substation has two project strategies for monitoring and
+detecting invasive carp. These strategies are fish community surveys,
+and targeted invasive carp monitoring. Fish community survey's focus on
+capturing every fish during each sampling event, while targeted invasive
+carp monitoring focuses on exclusively capturing invasive carp. Sampling
+gear(s) vary for each strategy, but when conducting a targeted invasive
+carp survey gear is designed to catch invasive carp (or similarly sized
+fish). Additionally, while conducting targeted invasive carp surveys,
+any fishes that cannot be identified are captured to confirm species.
+For example, a scoop through a school of presumed Gizzard Shad
+(*Dorosoma cepedianum*) is collected to confirm no young-of-the-year
+invasive carp are present.
+
+Of the `r Site_Info %>% nrow()` total surveys in `r params$YEAR`,
+`r ORIC_Site_FL %>% select(Project) %>% filter(Project %in% "Fish Community Survey") %>% nrow()`
+(48%) were fish community surveys and
+`r ORIC_Site_FL %>% select(Project) %>% filter(Project %in% "Targeted Invasive Carp Monitoring") %>% nrow()`
+(52%) were targeted invasive carp monitoring surveys. These early
+detection efforts utilized a total of `r Site_Data %>% group_by(Gear) %>% summarise() %>% nrow() %>% words()` unique gear types and were conducted within
+`r Site_Info %>% group_by(Site_Name) %>% summarise() %>% nrow() %>% words()`
+pools of the Ohio, Kanawha, and Muskingum Rivers:
+`r Site_Info %>% group_by(Site_Name) %>% summarise() %>% pluck('Site_Name')`
+(Figure 1). \vspace{.5cm}
+
+
+\pagestyle{fancy}
+\fancyhead[L,C]{}
+\fancyhead[R]{\textbf{LGLFWCO: Ohio River Substation Annual Report}}
+\fancyfoot[L]{\textit {Questions related to this report can be directed to Tyler Gross, Fish Biologist, Supervisor,\\
+LGLFWCO Ohio River Substation, Phone: 585-604-0629, Email: tyler\_gross$@$fws.gov}}
+\fancyfoot[C]{}
+\fancyfoot[R]{\textbf{\thepage}}
+\pagenumbering{arabic}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{2pt}
+
+\newpage
+
+```{r Data Manipulation, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE, results = 'hide'}
+SamplingData <- ORIC_Site_FL %>% # Calling Site table data
+  select(Site_ID, River_Basin, River_Pool,Tributary, Tributary_Pool, Tributary_Pool_Tributary, Start_Latitude, Start_Longitude, Gear, Gear_Specific) %>% # Selected required columns from Site table
+   mutate(Gear_Type = if_else(Gear == "Trawl", Gear_Specific, Gear)) %>%
+ mutate(Stream_Name = coalesce(Tributary_Pool_Tributary, Tributary, River_Basin)) %>% # Added new column name and ran ifelse to pull out tributary, main river, tributary of a tributary. is.na to filter any name with na to return Ohio River or Kanawha. !is.na to filter any name that isn't na.
+  mutate(Site_Name = coalesce(Tributary_Pool, River_Pool))
+
+## Create "Average" Sampling Locations
+points <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude) %>%
+  group_by(Site_Name) %>%
+  summarise(Avg_Lat = mean(Start_Latitude), Avg_Lon = mean(Start_Longitude))
+sites <- st_as_sf(points, coords = c("Avg_Lon", "Avg_Lat"),
+                  crs = 4326, agr = "constant")
+```
+
+```{r Map Prep, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -80.6, xmax = -85.18, ymin = 38.1, ymax = 40.00) #cropping the map to sampling area
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+River_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.25, color = " light blue", fill = NA) +
+  geom_sf(data = sites, size = 4, shape = 21, fill = "red3", color = "red1", stroke = 1.25, alpha = .5) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = LandDdf) +
+   geom_text(data=LandDdf, aes(label=Lock.and.Dam, x = Longitude, y = Latitude), nudge_x = 0.0001, nudge_y = -0.05, color="black", size = 2) +
+  annotate(geom = "text", x = -82.8, y = 39.5, label = "Ohio", 
+           fontface = "italic", color = "black", size = 4) +
+  annotate(geom = "text", x = -81, y = 38.85, label = "West Virginia", 
+           fontface = "italic", color = "black", size = 4) +
+  annotate(geom = "text", x = -81.95, y = 39.2, label = "Ohio River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -81.5, y = 38.5, label = "Kanawha River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -82, y = 39.62, label = "Muskingum River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -82, y = 39.55, label = "Stockport L&D", 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.9, y = 39.5, label = "Luke Chute L&D", 
+           color = "black", size = 2) +
+   annotate(geom = "text", x = -81.52, y = 39.62, label = "Beverly L&D", 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.35, y = 39.55, label = "Lowell L&D", 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.65, y = 39.46, label = "Devola L&D", 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -84, y = 38.4, label = "Kentucky", 
+           fontface = "italic", color = "black", size = 4) +
+  #(geom = "text", x = -85.10, y = 39.5, label = "Indiana", 
+           #fontface = "italic", color = "black", size = 4) +
+  coord_sf(xlim = c(-80.8, -84.95),ylim = c(38.2, 39.9)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+River_map # Calling the map
+```
+
+\large\textbf{Figure 1. Map of the early detection and monitoring area
+within the Ohio, Kanawha, and Muskingum Rivers. Black points represent Lock and Dam
+facilities which create their associated pools, while red points
+indicate the average of all sampling locations per pool in
+`r params$YEAR`.}
+
+
+\pagestyle{fancy}
+\fancyhead[L,C]{}
+\fancyhead[R]{\textbf{LGLFWCO: Ohio River Substation Annual Report}}
+\fancyfoot[L,C]{}
+\fancyfoot[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{2pt}
+
+\newpage
+
+```{r WI Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+WILandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Willow Island L&D", "Hannibal L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.4, xmax = -80.77, ymin = 39.28, ymax = 39.73) # cropping the map to sampling area
+#cropped_OR <- st_crop(OR_sf, xmin = -81.36, xmax = -80.8, ymin = 39.3, ymax = 39.7)
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+WillowIslandSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name)
+WillowIslandSites <- setDT(WillowIslandSites, key = 'Site_Name')[J(c("Willow Island"))]
+
+WillowIsland_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.5, color = " light blue") +
+  geom_point(data = WillowIslandSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red", "Gill Net" = "blue", "Dozer Trawl" = "magenta")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = WILandD) +
+  annotate(geom = "text", x = -80.86, y = 39.685, label = str_wrap("Hannibal L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.32, y = 39.33, label = str_wrap("Willow Island L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.3, y = 39.5, label = "Ohio", 
+           fontface = "italic", color = "black", size = 4) +
+  annotate(geom = "text", x = -81, y = 39.46, label = "West Virginia", 
+           fontface = "italic", color = "black", size = 4) +
+  annotate(geom = "text", x = -81.2, y = 39.452, label = "Ohio River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  #annotate(geom = "text", x = -81.5, y = 38.5, label = "Kanawha River", 
+           #fontface = "italic", color = "grey60", size = 2.5) +
+  coord_sf(xlim = c(-81.36, -80.8),ylim = c(39.3, 39.7)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+WillowIsland_map # Calling the map
+```
+
+\large\textbf{Figure 2. Map of the early detection and monitoring area
+within Willow Island Pool. Black points represent Lock and Dam facilities
+while colored points indicate each sampling location in `r params$YEAR`.
+Points away from the Ohio River line indicate sampling conducted in a
+tributary, backwater, or side channel.}
+
+```{r Belleville Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+BellevilleLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Willow Island L&D", "Belleville L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.28, xmax = -81.785, ymin = 39.09, ymax = 39.46) # cropping the map to sampling area
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+BellevilleSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name) # Pulling just coords for X pool sites and gear
+BellevilleSites <- setDT(BellevilleSites, key = 'Site_Name')[J(c("Belleville"))] # CHanging coords to single point
+
+
+Belleville_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.5, color = "light blue") +
+  geom_point(data = BellevilleSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red", "Dozer Trawl" = "magenta")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = BellevilleLandD) +
+  annotate(geom = "text", x = -81.72, y = 39.13, label = str_wrap("Belleville L&D", width =3), 
+           color = "black", size = 2) +
+   annotate(geom = "text", x = -81.33, y = 39.33, label = str_wrap("Willow Island L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.69, y = 39.34, label = "Ohio", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -81.66, y = 39.17, label = "West Virginia", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -81.53, y = 39.30, label = "Ohio River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -81.41, y = 39.43, label = "Muskingum River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  coord_sf(xlim = c(-81.31, -81.76),ylim = c(39.11, 39.44)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+Belleville_map # Calling the map
+```
+
+\large\textbf{Figure 3. Map of the early detection and monitoring area
+within Belleville Pool. Black points represent Lock and Dam facilities
+while colored points indicate each sampling location in `r params$YEAR`.
+Points away from the Ohio River line indicate sampling conducted in a
+tributary, backwater, or side channel.}
+
+```{r Racine Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+RacineLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Racine L&D", "Belleville L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.66, xmax = -82, ymin = 38.83, ymax = 39.17) # cropping the map to sampling area
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+RacineSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name)
+RacineSites <- setDT(RacineSites, key = 'Site_Name')[J(c("Racine"))]
+#RacineSites <- st_as_sf(RacineSites, coords = c("Start_Longitude", "Start_Latitude"),
+                 # crs = 4326)
+
+Racine_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.5, color = "light blue") +
+  geom_point(data = RacineSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red", "Electrified Gill Net" = "green", "Gill Net" = "yellow", "Mini-Fyke Net" = "brown", "Surface Trawl" = "blue", "Dozer Trawl" = "magenta", "Hoop Net" = "orange", "Seine" = "purple")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = RacineLandD) +
+  annotate(geom = "text", x = -81.73, y = 39.135, label = str_wrap("Belleville L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.91, y = 38.93, label = str_wrap("Racine L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.84, y = 38.98, label = "Ohio", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -81.72, y = 38.97, label = "West Virginia", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -81.82, y = 39.04, label = "Ohio River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -81.80, y = 38.89, label = "Mill Creek", 
+           fontface = "italic", color = "grey60", size = 2.5) +
+  coord_sf(xlim = c(-81.68, -81.96),ylim = c(38.85, 39.15)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+Racine_map # Calling the map
+```
+
+\large\textbf{Figure 4. Map of the early detection and monitoring area
+within Racine Pool. Black points represent Lock and Dam facilities while
+colored points indicate each sampling location in `r params$YEAR`. Points
+away from the Ohio River line indicate sampling conducted in a
+tributary, backwater, or side channel.}
+
+```{r RC Byrd Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+RCByrdLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Racine L&D", "R.C. Byrd L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.86, xmax = -82.3, ymin = 38.6, ymax = 39.1) # cropping the map to sampling area
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+RCByrdSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name)
+RCByrdSites <- setDT(RCByrdSites, key = 'Site_Name')[J(c("R.C. Byrd"))]
+
+RCByrd_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.5, color = "light blue") +
+  geom_point(data = RCByrdSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red", "Electrified Gill Net" = "green", "Gill Net" = "yellow", "Mini-Fyke Net" = "brown", "Surface Trawl" = "blue", "Dozer Trawl" = "magenta", "Hoop Net" = "orange", "Seine" = "purple")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = RCByrdLandD) +
+  annotate(geom = "text", x = -82.17, y = 38.69, label = str_wrap("R.C. Byrd L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.90, y = 38.90, label = str_wrap("Racine L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -82.13, y = 39.00, label = "Ohio", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -82.03, y = 38.93, label = "West Virginia", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -82.18, y = 38.89, label = "Ohio River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -82, y = 38.81, label = "Kanawha River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -82.24, y = 38.71, label = "Raccoon Creek", 
+           fontface = "italic", color = "grey60", size = 2.5) +
+  coord_sf(xlim = c(-81.88, -82.28),ylim = c(38.66, 39.07)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA , size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+RCByrd_map # Calling the map
+```
+
+\large\textbf{Figure 5. Map of the early detection and monitoring area
+within R.C. Byrd Pool. Black points represent Lock and Dam facilities
+while colored points indicate each sampling location in `r params$YEAR`.
+Points away from the Ohio River line indicate sampling conducted in a
+tributary, backwater, or side channel.}
+
+```{r Markland Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+MarklandLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Meldahl L&D", "Markland L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -84.1, xmax = -85.1, ymin = 38.7, ymax = 39.3) # cropping the map to sampling area
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+MarklandSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name)
+MarklandSites <- setDT(MarklandSites, key = 'Site_Name')[J(c("Markland"))]
+
+Markland_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.5, color = "light blue") +
+  geom_point(data = MarklandSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red", "Electrified Gill Net" = "green", "Surface Trawl" = "blue", "Dozer Trawl" = "magenta", "Gill Net" = "yellow", "Hoop Net" = "orange")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = MarklandLandD) +
+  annotate(geom = "text", x = -84.96, y = 38.78, label = str_wrap("Markland L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -84.171, y = 38.799, label = str_wrap("Meldahl L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -84.251, y = 39.1, label = "Ohio", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -84.613, y = 38.914, label = "Kentucky", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -84.95, y = 38.95, label = "Indiana", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -84.629, y = 39.070, label = "Ohio River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -84.92, y = 38.99, label = "Laughery Creek", 
+           fontface = "italic", color = "grey60", size = 2.5) +
+  coord_sf(xlim = c(-84.16, -85.00),ylim = c(38.72, 39.21)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA , size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+Markland_map # Calling the map
+```
+
+\large\textbf{Figure 6. Map of the early detection and monitoring area
+within Markland Pool. Black points represent Lock and Dam facilities
+while colored points indicate each sampling location in `r params$YEAR`.
+Sampling in this pool was in conjunction with Kentucky and Indiana state
+agencies for invasive carp removal. Points away from the Ohio River line
+indicate sampling conducted in a tributary, backwater, or side channel.}
+
+```{r Open Water Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+OpenWaterLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Winfield L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.85, xmax = -82.15, ymin = 38.5, ymax = 38.85) # cropping the map to sampling area
+#cropped_OR <- st_crop(OR_sf, xmin = -81.54, xmax = -81.95, ymin = 38.2, ymax = 38.66)
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+OpenWaterSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name)
+OpenWaterSites <- setDT(OpenWaterSites, key = 'Site_Name')[J(c("Open Water"))]
+
+OpenWater_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1, color = "light blue") +
+  geom_point(data = OpenWaterSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red","Electrified Gill Net" = "green", "Gill Net" = "yellow", "Surface Trawl" = "blue", "Dozer Trawl" = "magenta", "Hoop Net" = "orange")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = OpenWaterLandD) +
+  annotate(geom = "text", x = -81.90, y = 38.540, label = str_wrap("Winfield L&D", width =3), 
+           color = "black", size = 2) +
+  #annotate(geom = "text", x = -82.13, y = 39.00, label = "Ohio", 
+           #fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -82.085, y = 38.708, label = "West Virginia", 
+           fontface = "italic", color = "black", size = 3) +
+  #annotate(geom = "text", x = -82.2, y = 38.89, label = "Ohio River", 
+           #fontface = "italic", color = "grey60", size = 2.5) +
+  annotate(geom = "text", x = -81.92, y = 38.75, label = "Kanawha River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  coord_sf(xlim = c(-81.87, -82.135),ylim = c(38.52, 38.83)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+OpenWater_map # Calling the map
+```
+
+\large\textbf{Figure 7. Map of the early detection and monitoring area
+within Open Water Pool of the Kanawha River. Black points represent Lock
+and Dam facilities while colored points indicate each sampling location
+in `r params$YEAR`. Points away from the Kanawha River line indicate
+sampling conducted in a tributary, backwater, or side channel.}
+
+```{r Winfield Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+WinfieldLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Winfield L&D", "Marmet L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.5, xmax = -82, ymin = 38.18, ymax = 38.66) # cropping the map to sampling area
+#cropped_OR <- st_crop(OR_sf, xmin = -81.54, xmax = -81.95, ymin = 38.2, ymax = 38.66)
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+WinfieldSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name)
+WinfieldSites <- setDT(WinfieldSites, key = 'Site_Name')[J(c("Winfield"))]
+
+Winfield_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1, color = "light blue") +
+  geom_point(data = WinfieldSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = WinfieldLandD) +
+  annotate(geom = "text", x = -81.90, y = 38.5, label = str_wrap("Winfield L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.57, y = 38.23, label = str_wrap("Marmet L&D", width =3), 
+           color = "black", size = 2) +
+  #annotate(geom = "text", x = -82.13, y = 39.00, label = "Ohio", 
+           #fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -81.72, y = 38.4, label = "West Virginia", 
+           fontface = "italic", color = "black", size = 3) +
+  #annotate(geom = "text", x = -82.2, y = 38.89, label = "Ohio River", 
+           #fontface = "italic", color = "grey60", size = 2.5) +
+  annotate(geom = "text", x = -81.65, y = 38.30, label = "Kanawha River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  annotate(geom = "text", x = -81.87, y = 38.38, label = "Coal River", 
+           fontface = "italic", color = "grey60", size = 2.5) +
+  annotate(geom = "text", x = -81.63, y = 38.37, label = "Elk River", 
+           fontface = "italic", color = "grey60", size = 2.5) +
+  coord_sf(xlim = c(-81.54, -81.95),ylim = c(38.2, 38.6)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+Winfield_map # Calling the map
+```
+
+\large\textbf{Figure 8. Map of the early detection and monitoring area
+within Winfield Pool of the Kanawha River. Black points represent Lock and
+Dam facilities while colored points indicate each sampling location in
+`r params$YEAR`. Points away from the Kanawha River line indicate
+sampling conducted in a tributary, backwater, or side channel.}
+
+```{r Lowell Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+LowellLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Beverly L&D", "Lowell L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.48, xmax = -81.66, ymin = 39.51, ymax = 39.57) # cropping the map to sampling area
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+LowellSites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name) # Pulling just coords for X pool sites and gear
+LowellSites <- setDT(LowellSites, key = 'Site_Name')[J(c("Lowell"))] # CHanging coords to single point
+
+Lowell_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.5, color = "light blue") +
+  geom_point(data = LowellSites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red", "Gill Net" = "yellow", "Hoop Net" = "orange")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = LowellLandD) +
+  annotate(geom = "text", x = -81.514, y = 39.527, label = str_wrap("Lowell L&D", width =3), 
+           color = "black", size = 2) +
+   annotate(geom = "text", x = -81.648, y = 39.556, label = str_wrap("Beverly L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.53, y = 39.55, label = "Ohio", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -81.61, y = 39.54, label = "Muskingum River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  coord_sf(xlim = c(-81.51, -81.651),ylim = c(39.515, 39.566)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+Lowell_map # Calling the map
+```
+\large\textbf{Figure 9. Map of the early detection and monitoring area
+within Lowell Pool of the Muskingum River. Black points represent Lock and
+Dam facilities while colored points indicate each sampling location in
+`r params$YEAR`. Points away from the Muskingum River line indicate
+sampling conducted in a tributary, backwater, or side channel.}
+
+```{r Beverly Map, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE, results='hide', out.width= '100%', fig.align="center", fig.dim=c(7,7)}
+## Read in shapefiles
+US_sf <- st_read("data/state.shp")
+OR_sf <- st_read("data/Riverlines2.shp")
+
+LockandDamdata <- read.csv("LockandDams.csv") # read lock and dam coordinates file
+
+LandDdf <- data.frame(LockandDamdata) # Make csv file a df
+BeverlyLandD <- setDT(LandDdf, key = 'Lock.and.Dam')[J(c("Luke Chute L&D", "Beverly L&D"))]
+
+sf_use_s2(FALSE)
+cropped <- st_crop(US_sf, xmin = -81.63, xmax = -81.74, ymin = 39.52, ymax = 39.60) # cropping the map to sampling area
+
+cropped_XY <- st_zm(cropped, drop = TRUE, what = "ZM") # Dropping Z coordinates
+OR_sf_XY <- st_zm(OR_sf, drop = TRUE, what = "ZM") # Dropping Z coordinates
+
+BeverlySites <- SamplingData %>%
+  select(Site_Name, Start_Longitude, Start_Latitude, Gear_Type) %>%
+  group_by(Site_Name) # Pulling just coords for X pool sites and gear
+BeverlySites <- setDT(BeverlySites, key = 'Site_Name')[J(c("Beverly"))] # CHanging coords to single point
+
+Beverly_map <- ggplot() +
+  geom_sf(data = cropped_XY, size = .5, color = "grey60") +
+  geom_sf(data = OR_sf_XY, size = 1.5, color = "light blue") +
+  geom_point(data = BeverlySites, aes(x = Start_Longitude, y = Start_Latitude, color = Gear_Type), size=1.5) +
+  labs(col = "Gear Type") +
+  scale_color_manual(values = c("Electrofishing" = "red", "Gill Net" = "yellow", "Hoop Net" = "orange")) +
+  geom_point(aes(x = Longitude, y = Latitude), size = 1.5, shape = 21, fill = "black", data = BeverlyLandD) +
+  annotate(geom = "text", x = -81.721, y = 39.532, label = str_wrap("Luke Chute L&D", width =3), 
+           color = "black", size = 2) +
+   annotate(geom = "text", x = -81.65, y = 39.556, label = str_wrap("Beverly L&D", width =3), 
+           color = "black", size = 2) +
+  annotate(geom = "text", x = -81.68, y = 39.55, label = "Ohio", 
+           fontface = "italic", color = "black", size = 3) +
+  annotate(geom = "text", x = -81.697, y = 39.58, label = "Muskingum River", 
+           fontface = "italic", color = "navy", size = 2.5) +
+  coord_sf(xlim = c(-81.64, -81.73),ylim = c(39.525, 39.594)) +
+  annotation_scale(location = "bl", style = "ticks", line_col = "black", text_col = "black") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x=element_text(colour="black"),
+    axis.text.y=element_text(colour="black"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=.5)
+    ) # plotting the shapefiles together and adding the L&D data, labelling the L&Ds, labelling the states and rivers, plotting the average sampling locality and adding border and scalebar
+
+
+Beverly_map # Calling the map
+```
+
+\large\textbf{Figure 10. Map of the early detection and monitoring area
+within Beverly Pool of the Muskingum River. Black points represent Lock and
+Dam facilities while colored points indicate each sampling location in
+`r params$YEAR`. Points away from the Muskingum River line indicate
+sampling conducted in a tributary, backwater, or side channel.}
+
+\newpage
+
+\selectfont\large\textbf{Methods and Results} \vspace{.5cm}
+
+\selectfont\large This substation implements a multi-gear sampling
+effort to maximize the detection and capture of invasive carp in the Ohio River where little-to-no densities occur. We applied a random survey design for main and side channel sites and a fixed survey design for tributary and backwater sites (Table 1). Environmental and biological data are collected at each sampling site and consist of surface temperature (°C), dissolved oxygen (mg/L), conductivity ($\mu$S/cm), dominant substrate type, species identification to common name, and length (mm). All invasive carp encountered had additional biological data of weight (g) and sex collected.
+
+In `r params$YEAR`, a total of `r Site_Data %>% group_by(Gear) %>% summarise() %>% nrow() %>% words()` unique gear types, `r GearData %>% group_by(Gear_Type) %>% summarise() %>% pluck('Gear_Type')`, were utilized across `r Site_Info %>% nrow()` sampling sites (Table 2). The type of gear deployed was determined by suitable habitat and gear type restrictions per site. Electrofishing efforts ranged from `r min(EFData$EF_ShockTime_seconds, na.rm=TRUE)` seconds (`r round(min(EFData$EF_ShockTime_seconds, na.rm=TRUE)/60)` minutes) to `r max(EFData$EF_ShockTime_seconds, na.rm=TRUE)` seconds (`r round(max(EFData$EF_ShockTime_seconds, na.rm=TRUE)/60)` minutes) with an average shock time of `r round(mean(EFData$EF_ShockTime_seconds, na.rm=TRUE))` seconds
+(`r round(mean(EFData$EF_ShockTime_seconds, na.rm=TRUE)/60)` minutes). Deployed Gill Nets were approximately 300 or 150 feet in total length and varied in mesh size (4, 5 or 6 inch) and depth (6, 10 or 24 feet). Gill Nets are typically deployed for a minimum of 2 hours. Electrified Gill Net is a method that uses electricity to guide fish into a deployed Gill Net. This method is best used to directly target a group of fish, i.e., a school of invasive carp, with time and distance of sampling varying upon the site location.
+
+**There were a total of
+`r sum(Count_Data[which(Count_Data$Count_Common_Name == 'Bighead Carp' | Count_Data$Count_Common_Name =='Silver Carp' | Count_Data$Count_Common_Name =='Grass Carp'), 4])` invasive carp captured in `r params$YEAR` with
+`r Joint_Data %>% group_by(Site_Name) %>% filter( Site_Name %in% c("Winfield", "Racine", "Belleville", "Willow Island")) %>% filter(Count_Common_Name %in% c("Bighead Carp", "Silver Carp", "Grass Carp")) %>% nrow()`
+caught above R.C. Byrd Pool.** Total catch summaries for each of pool can be found in Appendix 1.
+
+\vspace{.5cm}
+
+\large\textbf{Table 1. Number of surveys conducted per pool by habitat
+type in `r params$YEAR`.} \vspace{.5cm}
+
+```{r habitat table, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE}
+Site_Info$Count <- 1
+
+Site_Table <-
+  aggregate(Count ~ Strata + Site_Name, data = Site_Info, FUN = sum) %>% # aggregate data by species and pool
+  as.data.frame() %>% # Neccessary? Makes it a dataframe
+  spread(, key = Strata, value = Count, fill = NA, drop = TRUE) %>% # Spreads the pool name out to columns instead of rows
+  adorn_totals(where = c("row", "col")) %>%
+  rename("Pool Name" = "Site_Name")
+  
+Site_Table[is.na(Site_Table)] <- "" # change NA values to blank space
+Site_Table
+
+kbl(Site_Table, booktabs = T,align = "lccccc", valign = "middle",linesep = "", centering = T) %>%
+  add_header_above(c(" ", "Habitat Type" = 5)) %>%
+kable_styling(font_size = 12, latex_options = c("striped", "hold_position"), stripe_color = "#d9d9d9") %>% 
+row_spec(0, italic = T, bold=T) # creates table
+```
+
+```{=tex}
+\vspace{.5cm}
+\newpage
+```
+\large\textbf{Table 2. Number of surveys conducted per pool by gear
+type in `r params$YEAR`.} \vspace{.5cm}
+
+```{r gear table, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE}
+GearData$Count <- 1
+
+Gear_Table <-
+  aggregate(Count ~ Gear_Type + Site_Name, data = GearData, FUN = sum) %>% # aggregate data by gear and pool
+  as.data.frame() %>% # Neccessary? Makes it a dataframe
+  spread(, key = Gear_Type, value = Count, fill = NA, drop = TRUE) %>%# Spreads the pool name out to columns instead of rows
+  adorn_totals(where = c("row", "col")) %>%
+  rename("Pool Name" = "Site_Name")
+
+Gear_Table[is.na(Gear_Table)] <- "" # change NA values to blank space
+Gear_Table
+
+kbl(Gear_Table, booktabs = T,align = "lcccccc", valign = "middle",linesep = "", centering = T) %>%
+  add_header_above(c(" ", "Gear Type" = 9)) %>%
+kable_styling(font_size = 12, latex_options = c("striped", "hold_position", "scale_down"), stripe_color = "#d9d9d9") %>% 
+row_spec(0, italic = T, bold=T) # creates table
+```
+
+\vspace{.5cm}
+
+\large\textbf{Table 3. Surveys with successful invasive carp captures `r params$YEAR`. }
+\vspace{.5cm}
+
+```{r Carp table, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE}
+Joint_Data$Number <- as.numeric(Joint_Data$Number)
+Carp_Data <- Joint_Data %>%
+  #select(Count_Common_Name, Number, Gear, Stream_Name, Site_Name) %>%
+  filter(Count_Common_Name %in% c("Bighead Carp", "Silver Carp", "Grass Carp")) %>%
+  rename("Species" = "Count_Common_Name") %>%
+  rename("Total Caught" = "Number") %>%
+  rename("Gear Type" = "Gear") %>%
+  rename("Tributary Name" = "Stream_Name") %>%
+  rename("Pool Name" = "Site_Name")
+
+Carp_Data <- Carp_Data[,-c(2,3,4,5,6)]
+Carp_Data <- Carp_Data[, c(1,2,3,4,5,6)]
+
+kbl(Carp_Data, booktabs = T,align = "lcccc", valign = "middle",linesep = "") %>%
+kable_styling(font_size = 12, latex_options = c("striped", "hold_position", "scale_down"), stripe_color = "#d9d9d9") %>% 
+row_spec(0, italic = T, bold=T) # creates table
+```
+
+```{=tex}
+\vspace{.5cm}
+\newpage
+```
+\selectfont\large\textbf{Partnership Support}
+
+Our office provides sampling assistance to state, federal, and Universities as part of a collaborative effort with local partners. Support was provided for both invasive carp specific projects and other various projects including native species. We plan on continuing to aide our partners in a wide range of projects as we grow staff and contacts in the area. \textbf{The following was additional sampling assistance provided in `r params$YEAR`:} \vspace{.5cm}
+
+\textbf {Agency- U.S. Fish and Wildlife Service:}
+
+-   Worked with LGLFWCO staff to conduct eDNA sampling within Ohio River
+    tributaries in West Virginia and Pennsylvania waters
+    -   300 samples collected across Tombleson Run, Little MIll Creek, Mill Creek and Sandy
+        Creek of Racine pool
+          - Total of four positive hits: two Bighead Carp (*Hypophthalmichthys nobilis*) detections in Mill Creek, one Bighead Carp and one invasive carp detection in Tombleson Run
+    -   100 samples collected in both Raccoon Creek and Beaver River in
+        Montgomery pool with zero positive detections
+    -   100 samples collected in Little Beaver Creek in New Cumberland
+        pool with zero positive detections
+    -   100 samples collected within Winfield pool in Armor Lake, Coal River and
+        the Pocatalico River with zero positive detections
+-   Assisted Carterville FWCO with tagging invasive carp in the Cannelton pool of the Ohio
+    River
+    -   200 invasive carp tagged in Markland Pool (200 Silver Carp, *Hypophthalmichthys molitrix*)
+-   Assisted Ohio River Islands National Wildlife Refuge with their
+    annual mussel surveys
+    -   Staff spent multiple days operating as boat captain and dive
+        tender
+    -   Assisted on tender boat for a multi-agency mussel survey
+-   Staff from Maryland FWCO assisted with our community surveys
+-   Assisted Green Bay FWCO with Ruffe (*Gymnocephalus cernua*) surveys in Little bay de Noc
+
+\textbf{Northeast Fishery Center:}
+
+-   Collecting fin clips of fish for validation of DNA markers for metabarcoding
+
+\textbf{Agency- West Virginia Department of Natural Resources:}
+
+-   Completed a joint effort in Raccoon Creek and the old lock chambers
+    within R.C. Byrd pool to tag invasive carp
+    -   Utilized overnight gill net sets in old lock chambers and gill net sets in Raccoon Creek to
+        capture and tag invasive carp
+    -   Three Silver Carp caught in WVDNR nets
+    -   One Bighead Carp caught in USFWS nets
+-   Conducted surveys for presence absence of invasive carp
+-   Assisted with Paddlefish (*Polyodon spathula*) egg mats in Middle Island Creek
+-   Assisted with Catfish surveys in Winfield pool
+-   Assisted with community surveys in R.C. Byrd pool
+-   Assisted with surface trawl surveys for young-of-year presence/absence of invasive carp
+
+\textbf{Agency- West Virginia University:}
+
+-   Conducted surveys in Willow Island pool for community size spectra
+    analysis
+-   Deployed gill nets to target American Paddlefish with Dr. Welsh in Raccoon Creek of R.C. Byrd pool
+    -   One Bighead Carp and two Silver Carp were caught and tagged by Dr. Welsh
+
+\textbf{Agency- Kentucky Department of Fish and Wildlife:}
+
+-   Conducted an invasive carp removal event through electrofishing and
+    gill netting for otolith removal
+    -   1 Bighead Carp and 55 Silver Carp were removed and otoliths
+        were collected
+
+\textbf{Agency- Pennsylvannia Fish and Boat Commission:}
+
+-   Assisted with identifying and counting species caught from surveys from 2023
+
+
+\newpage
+\KOMAoptions{paper=landscape, DIV=25}
+\fancypagestyle{plain}{}
+\pagestyle{empty}
+
+\large\textbf{Appendix 1. Number of fish caught per pool in
+`r params$YEAR`.} \vspace{.5cm}
+
+```{r fish table, message=FALSE, error=FALSE, warning=FALSE, echo= FALSE}
+Joint_Data$Number <- as.numeric(Joint_Data$Number)
+Fish_Table <- 
+  aggregate(Number ~ Count_Common_Name + Site_Name, data = Joint_Data, FUN = sum) %>% # aggregate data by species and pool
+  as.data.frame() %>% # Neccessary? Makes it a dataframe
+  spread(, key = Site_Name, value = Number, fill = NA, drop = TRUE) %>% # Spreads the pool name out to columns instead of rows
+  rename("Species" = "Count_Common_Name") #rename column name
+
+Fish_Table <- Fish_Table[, c(1,3,5,6,2,7,4,8,9,10)]
+Fish_Table <- Fish_Table %>%
+  mutate_at(c(2:6), as.numeric) %>%
+  adorn_totals(where = c("row", "col"), na.rm = TRUE) # totals up fish by pool
+Fish_Table[is.na(Fish_Table)] <- "" # change NA values to blank space
+Fish_Table
+
+kbl(Fish_Table, booktabs = T,align = "lccccc", valign = "middle",linesep = "", longtable = TRUE) %>%
+kable_styling(font_size = 12, latex_options = c("striped", "repeat_header"), fixed_thead = TRUE, stripe_color = "#d9d9d9") %>% 
+  footnote(general = "Centrarchid, Clupeid, Cyprinid and Moxostoma spp. are individuals that species could not be confirmed due to specimen being larval or to small", alphabet =("Bold rows are invasive species"), threeparttable = TRUE) %>%
+row_spec(0, italic = T, bold=T) %>% # creates table
+  row_spec(3, bold =T) %>%
+  #row_spec(33, bold =T) %>%
+  row_spec(57, bold =T)
+#number=("Unknowns are individuals waiting on species confirmation by WVU."),
+```
+\thispagestyle{empty}

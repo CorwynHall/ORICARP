@@ -1,0 +1,303 @@
+---
+fontsize: 11pt
+geometry: margin=0.75in
+header-includes:
+- \usepackage{fancyhdr}
+- \pagenumbering{gobble}
+- \usepackage{helvet}
+- \usepackage{tcolorbox}
+- \usepackage{pdflscape}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+- \usepackage{hyperref}
+output:
+  pdf_document:
+    df_print: paged
+  word_document: default
+urlcolor: blue
+params:
+  YEAR: 2024
+---
+
+```{r Packages, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(readxl)
+library(janitor)
+library(arcgisbinding)
+library(sf)
+library(ggspatial)
+library(ggrepel)
+library(english)
+library(kableExtra)
+library(ggforce)
+library(lwgeom)
+library(scales)
+library(magrittr)
+```
+
+```{r Data Fetch, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE, results = 'hide', cache = FALSE}
+
+##### Prefer Method:  Read Hosted Feature Layer
+
+arc.check_product() ### Checks arcGIS licensing ---> Must have a offline version of this license
+
+#### Early Detection Monitoring
+
+## EDM: Juvenile/Adult Fish
+# Site Data
+ORIC_Site_FL <- arc.select(arc.open(("https://services.arcgis.com/QVENGdaPbd4LUkLV/arcgis/rest/services/service_c8f005df2d814ee9a6a24999cbbb4f04/FeatureServer/0"))) %>%
+  filter(str_detect(Site_ID, as.character(params$YEAR)))
+
+# Fish Count Data
+ORIC_Count_FL <- arc.select(arc.open(("https://services.arcgis.com/QVENGdaPbd4LUkLV/arcgis/rest/services/service_c8f005df2d814ee9a6a24999cbbb4f04/FeatureServer/1"))) %>%
+  filter(str_detect(Count_ID, as.character(params$YEAR)))
+
+# Fish Length Data
+ORIC_Length_FL <- arc.select(arc.open(("https://services.arcgis.com/QVENGdaPbd4LUkLV/arcgis/rest/services/service_c8f005df2d814ee9a6a24999cbbb4f04/FeatureServer/2"))) %>%
+  filter(str_detect(Individual_ID, as.character(params$YEAR)))
+
+```
+
+\newcommand{\fon}[1]{\fontfamily{#1}\selectfont} 
+
+\begin{tcolorbox}[colback=black,colframe=black,coltext=white,left*=2mm,height=11mm, sharp corners,fontupper=\LARGE\fon{phv}\bfseries]
+U.S. Fish \& Wildlife Service
+\end{tcolorbox}\vspace{-.1cm}
+
+\Large\textbf{\fontfamily{phv}\selectfont Aquatic Invasive Species Quality Control Report}\vspace{-.1cm}
+
+\Large\textmd{\textit{Lower Great Lakes FWCO - Ohio River Invasive Carp Database}}\vspace{.5cm}
+
+\selectfont\large\textbf{Report Creation Date:} `r today()`
+
+\selectfont\large\textbf{Report Data Date Range:} `r as_date(min(ORIC_Site_FL$Start_DateTime))` to `r as_date(max(ORIC_Site_FL$Start_DateTime))`
+\vspace{.5cm}
+
+
+\selectfont\large This report is intended to provide a quality check of data submitted to the Lower Great Lakes FWCO Ohio River [Invasive Carp dataset](https://fws.maps.arcgis.com/home/item.html?id=8ffb703911f748eb8724de5af2516009#overview) on ArcGIS Online. Use this report periodically to verify data submissions and to identify records that need corrected. Record the corrections made on the last page of this report and store a digital scan of this PDF at the following folder path: P:/Projects/ANS/GLRI/EDM/Data Management/Quality Control Reports/QC Report Archive/Fish Reports 
+\vspace{.5cm}
+
+\selectfont\large\textbf{Check for missing values in required fields of the Site Table:}
+\vspace{.5cm}
+```{r check for missing values, echo=FALSE, warning=FALSE, message=FALSE}
+
+Site_Data <- ORIC_Site_FL %>% 
+  select(objectid, Site_ID, Project, Agency, Agency_Office, State, River_Basin, River_Pool, Gear, Gear_Specific, Start_DateTime, End_DateTime, Start_Latitude, Start_Longitude, Temperature_C, DO_mgL, Conductivity_mscm, Secchi_cm, Strata, EF_Amps, EF_Power_W, EF_Volts, EF_DutyCycle_percent, EF_Frequency, EF_ShockTime_seconds, Total_Captured, Species_Richness)
+
+NACheckList <- Site_Data %>% 
+  mutate(Site_ID_Check=ifelse(is.na(Site_ID)==TRUE, 1, 0)) %>%  #### convert to 1 if TRUE
+  mutate(Project_Check=ifelse(is.na(Project)==TRUE, 1, 0)) %>% 
+  mutate(Agency_Check=ifelse(is.na(Agency)==TRUE, 1, 0)) %>%
+  mutate(Agency_Office_Check=ifelse(is.na(Agency_Office)==TRUE, 1, 0)) %>% 
+  mutate(State_Check=ifelse(is.na(State)==TRUE, 1, 0)) %>%
+  mutate(River_Basin_Check=ifelse(is.na(River_Basin)==TRUE, 1, 0)) %>%  
+  mutate(River_Pool_Check=ifelse(is.na(River_Pool)==TRUE, 1, 0)) %>%  
+  mutate(Gear_Check=ifelse(is.na(Gear)==TRUE, 1, 0)) %>%  
+  mutate(Gear_Specific_Check=ifelse(is.na(Gear_Specific)==TRUE, 1, 0)) %>%  
+  mutate(Start_DateTime_Check=ifelse(is.na(Start_DateTime)==TRUE, 1, 0)) %>%  
+  mutate(End_DateTime_Check=ifelse(is.na(End_DateTime)==TRUE, 1, 0)) %>%  
+  mutate(Start_Latitude_Check=ifelse(is.na(Start_Latitude)==TRUE, 1, 0)) %>%  
+  mutate(Start_Longitude_Check=ifelse(is.na(Start_Longitude)==TRUE, 1, 0)) %>%  
+  adorn_totals(na.rm = TRUE) %>% 
+  as.data.frame() %>% 
+  filter(objectid=="Total") %>% 
+  select(., -c(2:27)) %>% 
+  rename(Site_ID=Site_ID_Check, Project=Project_Check, Agency=Agency_Check, Agency_Office=Agency_Office_Check, State=State_Check, River_Basin=River_Basin_Check, River_Pool=River_Pool_Check, Gear=Gear_Check, Gear_Specific=Gear_Specific_Check, Start_DateTime=Start_DateTime_Check, End_DateTime=End_DateTime_Check, Start_Latitude=Start_Latitude_Check, Start_Longitude=Start_Longitude_Check) %>% 
+  pivot_longer(cols =2:14, values_to = "Missing", names_to = "Field Name") %>% 
+  mutate(Status=if_else(Missing==0, "PASS", "FAIL")) %>% 
+  select(-objectid) %>% 
+  rename("Number Missing"=Missing,)
+  
+kbl(NACheckList, booktabs = T,align = "lcc", valign = "middle",linesep = "") %>%
+kable_styling(font_size = 12, latex_options = c("striped", "hold_position"), stripe_color = "#d9d9d9") %>% 
+row_spec(0, italic = T, bold=T) %>% 
+  column_spec(3, color=ifelse(NACheckList$Status=="FAIL", "red", "#236734"), bold=T)
+
+```
+
+\selectfont\large\textbf{Coordinate Accuracy Reminder}
+\selectfont\large Please check sample location accuracy by referencing map based dashboards or visually displaying the data in ArcGIS Online or ArcPro. [Click here](https://fws.maps.arcgis.com/apps/dashboards/4b9c6eb5f41d4c9d88f88f848c30240a) to view the Ohio River Substation Invasive Carp Monitoring Dashboard.
+\vspace{.5cm}
+
+\newpage
+\selectfont\large\textbf{Check for values outside expected ranges in the Site Table:} 
+\vspace{.5cm}
+```{r  Value range check, echo=FALSE, warning=FALSE, message=FALSE}
+Masterrange <- Site_Data %>% 
+  select(Site_ID, Project, Temperature_C, DO_mgL, Conductivity_mscm, EF_Amps, EF_Power_W, EF_Volts, EF_DutyCycle_percent, EF_ShockTime_seconds, Total_Captured)%>%
+  mutate(Temperature_C_Range=ifelse(Temperature_C>30, 1, 0)) %>% 
+  mutate(DO_mgL_Range=ifelse(DO_mgL>12, 1, 0)) %>% 
+  mutate(Conductivity_mscm_Range=ifelse(Conductivity_mscm>800, 1, 0)) %>% 
+  mutate(EF_Amps_Range=ifelse(EF_Amps>40, 1, 0)) %>%
+  mutate(EF_Power_W_Range=ifelse(EF_Power_W>15000, 1, 0)) %>%
+  mutate(EF_Volts_Range=ifelse(EF_Volts>500, 1, 0)) %>% 
+  mutate(EF_DutyCycle_percent_Range=ifelse(EF_DutyCycle_percent>=100, 1, 0)) %>% 
+  mutate(EF_ShockTime_seconds_Range=ifelse(EF_ShockTime_seconds>1500, 1, 0)) %>% 
+  mutate(Total_Captured_Range=ifelse(Total_Captured>5000, 1, 0)) %>% 
+  select(., -c(2:11))
+
+Rangetable <- Masterrange %>% 
+  rename(`Surface Water Temperature (C)`= Temperature_C_Range, `Dissolved Oxygen (mg/L)` = DO_mgL_Range, `Conductivity (ms/mL)` = Conductivity_mscm_Range, `Peak Shocking Amperage` = EF_Amps_Range, `Peak Shocking Power (Watts)` = EF_Power_W_Range, `Peak Shocking Voltage` = EF_Volts_Range, `Duty Cycle (Percent)` = EF_DutyCycle_percent_Range, `Shock Time (seconds)` = EF_ShockTime_seconds_Range, `Total Fish Captured` = Total_Captured_Range) %>% 
+  pivot_longer(cols =2:10, values_to = "Outside", names_to = "Field") %>%
+  mutate(Outside=replace_na(Outside,0)) %>% 
+  group_by(Field) %>% 
+  summarize(Outside=sum(Outside)) %>% 
+  mutate(Outside=replace_na(Outside,0)) %>% 
+  mutate(Status=if_else(Outside>0, "FAIL", "PASS")) %>% 
+  mutate(Criteria = if_else(Field == 'Surface Water Temperature (C)', ">40", if_else(Field == 'Dissolved Oxygen (mg/L)', ">10", if_else(Field == 'Conductivity (ms/mL)', ">800", if_else(Field == 'Peak Shocking Amperage', ">40", if_else(Field == 'Peak Shocking Power (Watts)', ">15000", if_else(Field == 'Peak Shocking Voltage', ">500", if_else(Field == 'Duty Cycle (Percent)', ">=100", if_else(Field == 'Shock Time (seconds)', ">1500", if_else(Field == 'Total Fish Captured', ">5000", "Wrong")))))))))) %>% 
+  select("Field Name"=Field, Criteria, "Number Outside"=Outside, Status)
+  
+kbl(Rangetable, booktabs = T,align = "lccc", valign = "middle",linesep = "") %>%
+kable_styling(font_size = 12, latex_options = c("striped", "hold_position"), stripe_color = "#d9d9d9") %>% 
+row_spec(0, italic = T, bold=T) %>% 
+  column_spec(4, color=ifelse(Rangetable$Status=="FAIL", "red", "#236734"), bold=T)
+```
+\vspace{1cm}
+
+\selectfont\large\textbf{Check for missing values in the Count Table:}
+\vspace{.5cm}
+```{r Counts check, echo=FALSE, warning=FALSE, message=FALSE}
+
+Count_Data <- ORIC_Count_FL %>% 
+  select(objectid, Count_ID, Count_Common_Name, Number)
+
+NACheckList_Count <- Count_Data %>% 
+  mutate(Count_ID_Check=ifelse(is.na(Count_ID)==TRUE, 1, 0)) %>%  #### convert to 1 if TRUE
+  mutate(Count_Common_Name_Check=ifelse(is.na(Count_Common_Name)==TRUE, 1, 0)) %>% 
+  mutate(Number_Check=ifelse(is.na(Number)==TRUE, 1, 0)) %>%
+  adorn_totals(na.rm = TRUE) %>% 
+  as.data.frame() %>% 
+  filter(objectid=="Total") %>% 
+  select(., -c(2:4)) %>% 
+  rename(Count_ID=Count_ID_Check, `Common Name`=Count_Common_Name_Check, Number=Number_Check) %>% 
+  pivot_longer(cols =2:4, values_to = "Missing", names_to = "Field Name") %>% 
+  mutate(Status=if_else(Missing==0, "PASS", "FAIL")) %>% 
+  select(-objectid) %>% 
+  rename("Number Missing"=Missing,)
+  
+kbl(NACheckList_Count, booktabs = T,align = "lcc", valign = "middle",linesep = "") %>%
+kable_styling(font_size = 12, latex_options = c("striped", "hold_position"), stripe_color = "#d9d9d9") %>% 
+row_spec(0, italic = T, bold=T) %>% 
+  column_spec(3, color=ifelse(NACheckList_Count$Status=="FAIL", "red", "#236734"), bold=T)
+
+```
+```{r Count Fails, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+Count_Fails <- Count_Data %>%
+  select(objectid, Count_ID, Count_Common_Name) %>%
+  get_dupes(c(Count_ID, Count_Common_Name)) %>% 
+  unique()
+  Count_Fails$objectid <- as.character(Count_Fails$objectid)
+ObjectID <- if(any(Count_Fails$objectid== "")) print(Count_Fails$objectid) else print("No ObjectIDs Failed.")
+
+  #Count_Data %>% mutate(Count_ID_Check=ifelse(is.na(Count_ID)==TRUE, 1, 0)) %>% mutate(Count_Common_Name_Check=ifelse(is.na(Count_Common_Name)==TRUE, 1, 0)) %>% mutate(Number_Check=ifelse(is.na(Number)==TRUE, 1, 0)) %>% select(., -c(2:4)) %>% mutate(Total = Count_ID_Check + Count_Common_Name_Check + Number_Check) %>% filter(Total >= 1) %>% magrittr::extract2("objectid")
+```
+\vspace{.5cm}
+List of Object IDs of records that failed: `r ObjectID`
+
+\vspace{.35cm}
+
+\selectfont\large\textbf{Check for Duplicate Common Names in the Count Table:}
+\vspace{.5cm}
+```{r Counts Duplicate Common Names check, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+
+Count_Dupe_Data <- ORIC_Count_FL %>% 
+  select(Count_ID, Count_Common_Name) %>% 
+  get_dupes(c(Count_ID, Count_Common_Name)) %>% 
+  unique() %>% 
+  rename(Site_ID = Count_ID, `Common Name` = Count_Common_Name, `Number of Duplicates` = dupe_count)
+
+CountID <- if(any(Count_Dupe_Data$Site_ID== "")) print(Count_Dupe_Data$Site_ID) else print("No ObjectIDs Failed.")
+```
+
+\vspace{.5cm}
+List of Object IDs of records that failed: `r CountID`
+
+\vspace{.35cm}
+
+\selectfont\large\textbf{Check for missing values in the Individual Table:}
+\vspace{.5cm}
+```{r Lengths check, echo=FALSE, warning=FALSE, message=FALSE}
+
+Individual_Data <- ORIC_Length_FL %>% 
+  select(objectid, Individual_ID, Individual_Common_Name, Length_mm, Individual_Barcode)
+
+NACheckList_Length <- Individual_Data %>% 
+  mutate(Individual_ID_Check=ifelse(is.na(Individual_ID)==TRUE, 1, 0)) %>%  #### convert to 1 if TRUE
+  mutate(Individual_Common_Name_Check=ifelse(is.na(Individual_Common_Name)==TRUE, 1, 0)) %>% 
+  mutate(Length_mm_Check=ifelse(is.na(Length_mm)==TRUE, 1, 0)) %>%
+  mutate(Individual_Barcode_Check=ifelse(is.na(Individual_Barcode)==FALSE & Individual_Common_Name == "Unknown", 1, 0)) %>%
+  adorn_totals(na.rm = TRUE) %>% 
+  as.data.frame() %>% 
+  filter(objectid=="Total") %>% 
+  select(., -c(2:5)) %>% 
+  rename(Individual_ID=Individual_ID_Check, `Common Name`=Individual_Common_Name_Check, `Length (mm)`=Length_mm_Check, `Unknown Fish to be Identified (Barcodes)` = Individual_Barcode_Check) %>% 
+  pivot_longer(cols =2:5, values_to = "Missing", names_to = "Field Name") %>% 
+  mutate(Status=if_else(Missing==0, "PASS", "FAIL")) %>% 
+  select(-objectid) %>% 
+  rename("Number Missing"=Missing,)
+  
+kbl(NACheckList_Length, booktabs = T,align = "lcc", valign = "middle",linesep = "") %>%
+kable_styling(font_size = 12, latex_options = c("striped", "hold_position"), stripe_color = "#d9d9d9") %>% 
+row_spec(0, italic = T, bold=T) %>% 
+  column_spec(3, color=ifelse(NACheckList_Length$Status=="FAIL", "red", "#236734"), bold=T)
+```
+
+```{r Duplicate Individual check, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+Individual_Dupe_Data <- ORIC_Length_FL %>% 
+  select(objectid, Individual_ID, Individual_Common_Name, Length_mm, Individual_Barcode) %>% 
+  get_dupes(c(Individual_ID, Individual_Common_Name)) %>% 
+  unique()
+
+IndividualID <- if(any(Individual_Dupe_Data$objectid== "")) print(Individual_Dupe_Data$objectid) else 
+  print("No ObjectIDs Failed.")
+```
+
+\vspace{.5cm}
+List of Object IDs of records that failed: `r IndividualID`
+
+\vspace{.5cm}
+List of Barcodes that need to be identified: `r Individual_Data %>% mutate(Individual_Barcode_Check=ifelse(is.na(Individual_Barcode)==FALSE & Individual_Common_Name == "Unknown", 1, 0)) %>% select(., objectid, Individual_Barcode, Individual_Barcode_Check) %>% filter(Individual_Barcode_Check >= 1) %>% group_by(Individual_Barcode) %>% magrittr::extract2("Individual_Barcode")`
+
+\newpage
+
+```{r Length Boxplots, echo=FALSE, fig.height=10.5, fig.width=7.5, message=FALSE, warning=FALSE}
+Masterlengths <- ORIC_Length_FL %>% 
+  select(Individual_ID, Individual_Common_Name, Length_mm) %>%
+  mutate(Species_Name=as.factor(Individual_Common_Name))
+
+### calculates the number of pages required to fit 21 plots per page
+### and informs the loop below
+Pages<- ceiling(
+  length(unique(Masterlengths$Individual_Common_Name))/21-1
+)   
+  
+###  A loop of boxplots to spread the plots across multiple pages
+### and is set up to have 21 plots per page as identified in 'Pages' above.
+## Required ggplot and ggforce packages
+for (i in seq_len(Pages)) 
+{ 
+  print(ggplot(Masterlengths, aes(Length_mm))+ geom_boxplot()+theme_classic()+
+  theme(axis.title.y = element_text(face="bold", size=14),axis.text.y = element_blank())+ 
+  theme(axis.title.x = element_text(face="bold", size=14),axis.text.x = element_text(size=12, colour="black"))+
+  theme(strip.background = element_rect(colour = "White", fill = "white"))+ 
+  theme(strip.text = element_text(size=11, face = "bold"))+
+    labs(title = "Total length boxplots by Species")+ 
+    theme(plot.title = element_text(hjust = 0.4, size=12, face="bold"))+
+  facet_wrap_paginate(~Individual_Common_Name, ncol = 3, nrow = 7, page = i,
+                        strip.position="top", scales="free_x"))
+}
+```
+
+\newpage
+
+
+\mbox{}
+\large Please document edits to data here with initials and date: 
+
+\TextField[name=vor,width=7in,height=9in,charsize=11pt,multiline=true,borderwidth=0]
+{\mbox{}}
+
+
+
